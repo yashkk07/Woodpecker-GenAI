@@ -1,22 +1,69 @@
-import faiss
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 import numpy as np
 
-class VectorStore:
-    def __init__(self, embeddings):
-        self.embeddings = embeddings
-        self.index = None
-        self.chunks = []
+# Try to import Embeddings base class from installed langchain packages
+try:
+    from langchain_core.embeddings.base import Embeddings
+except Exception:
+    try:
+        from langchain.embeddings.base import Embeddings
+    except Exception:
+        Embeddings = object
 
-    def build(self, chunks):
-        self.chunks = chunks
-        vectors = self.embeddings.encode(chunks, convert_to_numpy=True).astype("float32")
 
-        dim = vectors.shape[1]
-        self.index = faiss.IndexFlatL2(dim)
-        self.index.add(vectors)
+class SentenceTransformerEmbeddingWrapper(Embeddings):
+    """Adapter that wraps a SentenceTransformer-style encoder and
+    implements the LangChain `Embeddings` interface.
 
-    def search(self, query, k=5):
-        query_vec = self.embeddings.encode([query], convert_to_numpy=True).astype("float32")
-        _, indices = self.index.search(query_vec, k)
+    This avoids passing a raw function/callable to vectorstores and
+    prevents the deprecation warning about `embedding_function`.
+    """
+    def __init__(self, model):
+        self.model = model
 
-        return [self.chunks[i] for i in indices[0] if i < len(self.chunks)]
+    def embed_documents(self, texts):
+        # return List[List[float]]
+        arr = self.model.encode(texts, convert_to_numpy=True)
+        if isinstance(arr, np.ndarray):
+            return arr.tolist()
+        return [list(x) for x in arr]
+
+    def embed_query(self, text):
+        arr = self.model.encode([text], convert_to_numpy=True)
+        if isinstance(arr, np.ndarray):
+            return arr[0].tolist()
+        return list(arr[0])
+
+
+def build_vector_store(chunks, embedder):
+    """
+    Builds and returns a LangChain FAISS vector store.
+
+    Args:
+        chunks (List[str]): Text chunks extracted from the PDF
+        embedder: LangChain-compatible embedding model
+
+    Returns:
+        FAISS: LangChain FAISS vector store with similarity_search support
+    """
+
+    # Convert text chunks into LangChain Documents
+    documents = [
+        Document(page_content=chunk) for chunk in chunks
+    ]
+
+    # If user passed a raw SentenceTransformer (or any object with
+    # `encode`), wrap it so LangChain can call `embed_documents`.
+    if not hasattr(embedder, "embed_documents") and hasattr(embedder, "encode"):
+        embedding = SentenceTransformerEmbeddingWrapper(embedder)
+    else:
+        embedding = embedder
+
+    # Build FAISS vector store
+    vector_store = FAISS.from_documents(
+        documents=documents,
+        embedding=embedding
+    )
+
+    return vector_store
