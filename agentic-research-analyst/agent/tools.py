@@ -1,137 +1,134 @@
 from langchain.tools import tool
-from typing import List
 import os
 
-# These will be injected at runtime
+# Runtime-injected globals
 _vector_store = None
 _llm = None
 _last_context = None
 
-# configurable retrieve k (can be set via env or at runtime)
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "4"))
 
 
 def set_retrieval_k(k: int):
-    """Set the number of chunks to retrieve for semantic search."""
+    """Set the number of document chunks to retrieve during semantic search."""
     global RETRIEVE_K
-    try:
-        k = int(k)
-    except Exception:
-        return
-    RETRIEVE_K = max(1, k)
+    RETRIEVE_K = max(1, int(k))
 
 
 def initialize_tools(vector_store, llm):
     """
-    Initialize shared objects for tools.
-    This MUST be called once after vector store creation.
+    Initialize shared resources for agent tools.
+
+    Must be called once after building the vector store and LLM.
     """
-    global _vector_store, _llm
+    global _vector_store, _llm, _last_context
     _vector_store = vector_store
     _llm = llm
-    global _last_context
     _last_context = None
+
+@tool
+def plan_steps(goal: str) -> str:
+    """
+    Break down the user's goal into a clear, ordered plan of steps.
+
+    This tool is used at the start of reasoning to decide which tools
+    should be called and in what sequence to accomplish the goal.
+    """
+    if _llm is None:
+        raise RuntimeError("LLM not initialized.")
+
+    prompt = f"""
+You are a planning module for an AI Research Analyst.
+
+Given the user goal below, break it into a short, ordered list of steps.
+Each step should be an action such as:
+- retrieving document context
+- summarizing content
+- extracting action items
+- producing a final answer
+
+User goal:
+{goal}
+
+Respond with a numbered list of steps.
+"""
+
+    response = _llm.invoke(prompt)
+    return response.content
 
 
 @tool
 def retrieve_context(query: str) -> str:
     """
-    Retrieve the most relevant document chunks for a given query.
-    Uses semantic similarity search over the vector store.
+    Retrieve the most relevant document chunks related to the user query.
+
+    Use this tool FIRST before answering any question.
+    It performs semantic similarity search over the uploaded document
+    and returns the top relevant chunks as context.
     """
     if _vector_store is None:
         raise RuntimeError("Vector store not initialized.")
 
-    # Retrieve top-k chunks (configurable) and truncate to keep payload reasonable
     docs = _vector_store.similarity_search(query, k=RETRIEVE_K)
 
-    def _truncate(s: str, n: int = 1500):
-        if not s:
-            return s
-        if len(s) <= n:
-            return s
-        # try to cut at a newline for readability
-        part = s[:n]
-        if "\n" in part:
-            part = part.rsplit("\n", 1)[0]
-        return part + ("..." if len(s) > n else "")
-
-    result = "\n\n".join(
-        f"[Chunk {i+1}]\n{_truncate(doc.page_content, 1500)}"
+    context = "\n\n".join(
+        f"[Chunk {i+1}]\n{doc.page_content}"
         for i, doc in enumerate(docs)
     )
 
-    # cache last retrieved context so subsequent tool calls can use it
     global _last_context
-    _last_context = result
-
-    return result
+    _last_context = context
+    return context
 
 
 @tool
 def summarize_context(context: str) -> str:
     """
-    Summarize the provided document context.
+    Generate a concise summary of the retrieved document context.
+
+    If no context is explicitly provided, the tool will summarize
+    the most recently retrieved document chunks.
     """
     if _llm is None:
         raise RuntimeError("LLM not initialized.")
 
-    # If the model passed a placeholder string indicating it expects the
-    # previously retrieved context, substitute the cached context.
     global _last_context
-    if not context or "document context retrieved" in context.lower() or "you haven't provided" in context.lower():
-        if _last_context:
-            # truncate cached context to keep prompt size reasonable
-            context = _last_context[:4000]
-        else:
-            return "No document context available. Please run `retrieve_context` first or provide the document text."
+    if not context and _last_context:
+        context = _last_context
 
     prompt = f"""
-Summarize the following document context clearly and concisely:
+Summarize the following document context clearly and concisely.
+Only use the provided text.
 
 {context}
 """
+
     response = _llm.invoke(prompt)
-    return getattr(response, "content", str(response))
+    return response.content
 
 
 @tool
 def extract_action_items(context: str) -> str:
     """
-    Extract clear, actionable insights from the document context.
+    Extract 5–7 clear, actionable insights from the document context.
+
+    The output should be practical, business-focused, and grounded
+    strictly in the provided document content.
     """
     if _llm is None:
         raise RuntimeError("LLM not initialized.")
 
     global _last_context
-    if not context or "document context retrieved" in context.lower() or "you haven't provided" in context.lower():
-        if _last_context:
-            # truncate cached context to keep prompt size reasonable
-            context = _last_context[:4000]
-        else:
-            return "No document context available. Please run `retrieve_context` first or provide the document text."
+    if not context and _last_context:
+        context = _last_context
 
     prompt = f"""
 From the following document context, extract 5–7 clear, actionable insights.
 Present them as bullet points.
-Only use the provided content.
+Do NOT add information not present in the document.
 
 {context}
 """
+
     response = _llm.invoke(prompt)
-    return getattr(response, "content", str(response))
-
-
-@tool
-def brave_search(query: str) -> str:
-    """Stub for web search calls.
-
-    This environment is configured to answer STRICTLY from uploaded
-    documents. External web search is disabled to prevent tool misuse.
-    The model may still attempt to call `brave_search`; return a clear
-    message instructing it to use `retrieve_context` instead.
-    """
-    return (
-        "External web search disabled. "
-        "Use the `retrieve_context` tool to fetch document-based evidence."
-    )
+    return response.content

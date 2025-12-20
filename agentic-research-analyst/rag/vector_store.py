@@ -1,69 +1,36 @@
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 import numpy as np
 
-# Try to import Embeddings base class from installed langchain packages
-try:
-    from langchain_core.embeddings.base import Embeddings
-except Exception:
-    try:
-        from langchain.embeddings.base import Embeddings
-    except Exception:
-        Embeddings = object
 
-
-class SentenceTransformerEmbeddingWrapper(Embeddings):
-    """Adapter that wraps a SentenceTransformer-style encoder and
-    implements the LangChain `Embeddings` interface.
-
-    This avoids passing a raw function/callable to vectorstores and
-    prevents the deprecation warning about `embedding_function`.
+class SentenceTransformerEmbeddings(Embeddings):
     """
+    LangChain-compatible wrapper around SentenceTransformer.
+    """
+
     def __init__(self, model):
         self.model = model
 
     def embed_documents(self, texts):
-        # return List[List[float]]
-        arr = self.model.encode(texts, convert_to_numpy=True)
-        if isinstance(arr, np.ndarray):
-            return arr.tolist()
-        return [list(x) for x in arr]
+        vectors = self.model.encode(texts, convert_to_numpy=True)
+        return vectors.tolist()
 
     def embed_query(self, text):
-        arr = self.model.encode([text], convert_to_numpy=True)
-        if isinstance(arr, np.ndarray):
-            return arr[0].tolist()
-        return list(arr[0])
+        vector = self.model.encode([text], convert_to_numpy=True)[0]
+        return vector.tolist()
 
 
-def build_vector_store(chunks, embedder):
+def build_vector_store(chunks, sentence_transformer_model):
     """
-    Builds and returns a LangChain FAISS vector store.
-
-    Args:
-        chunks (List[str]): Text chunks extracted from the PDF
-        embedder: LangChain-compatible embedding model
-
-    Returns:
-        FAISS: LangChain FAISS vector store with similarity_search support
+    Build a FAISS vector store from text chunks.
     """
 
-    # Convert text chunks into LangChain Documents
-    documents = [
-        Document(page_content=chunk) for chunk in chunks
-    ]
+    documents = [Document(page_content=chunk) for chunk in chunks]
 
-    # If user passed a raw SentenceTransformer (or any object with
-    # `encode`), wrap it so LangChain can call `embed_documents`.
-    if not hasattr(embedder, "embed_documents") and hasattr(embedder, "encode"):
-        embedding = SentenceTransformerEmbeddingWrapper(embedder)
-    else:
-        embedding = embedder
+    embeddings = SentenceTransformerEmbeddings(sentence_transformer_model)
 
-    # Build FAISS vector store
-    vector_store = FAISS.from_documents(
+    return FAISS.from_documents(
         documents=documents,
-        embedding=embedding
+        embedding=embeddings
     )
-
-    return vector_store
