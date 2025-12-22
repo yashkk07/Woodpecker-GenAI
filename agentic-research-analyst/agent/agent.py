@@ -32,6 +32,8 @@ Operating rules:
 - Use external search ONLY if document info is insufficient
 - Clearly label external content
 - Never hallucinate facts
+- Cite all sources in the final answer
+- Provide concise, relevant answers
 """
     )
 

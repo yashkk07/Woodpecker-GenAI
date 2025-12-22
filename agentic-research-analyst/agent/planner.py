@@ -15,4 +15,6 @@ Plan:
 3. Summarize findings
 4. Extract risks, opportunities, or actions if requested
 5. Evaluate if information is missing
+6. If needed, perform external search for missing info
+7. Compile final answer with clear citations
 """

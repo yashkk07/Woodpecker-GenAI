@@ -16,6 +16,9 @@ Example insights:
 - Industry best practices from McKinsey AI reports
 - Regulatory guidance from OECD / ISO AI governance
 - Market opportunities from Gartner
+- Recent advancements from arXiv papers
+
+When using this data, always cite the source clearly.
 
 (Source: External web research)
 """

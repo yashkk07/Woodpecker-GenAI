@@ -23,7 +23,7 @@ import requests
 import json
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "mistral:7b"
+MODEL_NAME = "llama3:latest"
 
 def generate_answer(prompt: str) -> str:
     payload = {
